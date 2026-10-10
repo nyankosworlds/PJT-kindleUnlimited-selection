@@ -47,11 +47,12 @@ target_mode = st.radio(
 # 4. Amazon個別リンク（直リンク）生成用関数
 # ---------------------------------------------------------
 def create_amazon_url(asin, search_keyword, mode):
-    if asin and len(asin) == 10:
-        # ASINを使った確実な個別商品ページへの直リンク
-        return f"https://www.amazon.co.jp/dp/{asin}?tag={ASSOCIATE_TAG}"
+    # ASINが10桁で正しく取得できている場合は個別ページへの直リンク
+    if asin and isinstance(asin, str) and len(asin.strip()) == 10:
+        clean_asin = asin.strip()
+        return f"https://www.amazon.co.jp/dp/{clean_asin}?tag={ASSOCIATE_TAG}"
     else:
-        # 万が一ASINが空または不正な場合のフォールバック（検索結果リンク）
+        # 万が一ASINがない場合のフォールバック（検索結果リンク）
         encoded_keyword = urllib.parse.quote(search_keyword)
         if mode == "Kindle Unlimited対象のみ":
             return (
@@ -64,7 +65,7 @@ def create_amazon_url(asin, search_keyword, mode):
             return f"https://www.amazon.co.jp/s?k={encoded_keyword}&tag={ASSOCIATE_TAG}"
 
 # ---------------------------------------------------------
-# 5. AI選書ロジック（Google検索 ＋ ASIN取得）
+# 5. AI選書ロジック（安定版）
 # ---------------------------------------------------------
 def fetch_recommendations(prompt_text, exclude_list, mode):
     # SecretsからAPIキーを取得してクライアント作成
@@ -73,8 +74,8 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
 
     system_instruction = """
     あなたは親切で優秀なプロの選書家です。
-    ユーザーの入力内容に基づいて、日本のAmazonに実際に存在する信頼性の高い本を5冊選定してください。
-    各書籍のAmazonのURLに含まれる10桁のASIN（またはISBN-10）を正確に出力してください。
+    ユーザーの入力内容に基づいて、日本のAmazonに実際に存在する本を5冊選定してください。
+    各書籍のAmazonページにある10桁のASIN（またはISBN-10）を正確に調べて出力してください。わからない場合は空欄ではなく、代表的な類似書籍のASINを入れてください。
     以下の指定されたJSONフォーマットのみを出力してください。余計な解説文やMarkdownの装飾は含めないでください。
 
     【出力JSONフォーマット】
@@ -100,7 +101,7 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     {", ".join(exclude_list) if exclude_list else "なし"}
     """
 
-    # 安定動作のためtools設定を一時的に除外
+    # 安定動作する構成でAPI呼び出し
     response = client.models.generate_content(
         model="gemini-3.8-flash",
         contents=user_prompt,
@@ -116,6 +117,7 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     except Exception as e:
         st.error("AIからのデータ取得に失敗しました。もう一度お試しください。")
         return []
+
 # ---------------------------------------------------------
 # 6. ボタン処理とメイン描画
 # ---------------------------------------------------------
@@ -128,7 +130,7 @@ with col1:
             st.warning("リクエスト内容を入力してください。")
         else:
             st.session_state.history_titles = []
-            with st.spinner("AIが実在する本を検索・選書中..."):
+            with st.spinner("AIが選書中..."):
                 results = fetch_recommendations(user_input, st.session_state.history_titles, target_mode)
                 st.session_state.current_recommendations = results
                 for book in results:
@@ -158,7 +160,7 @@ if st.session_state.current_recommendations:
         asin = book.get("asin", "")
         keyword = book.get("search_keyword", f"{title} {author}")
         
-        # 直リンク（ASIN利用）を生成
+        # 個別直リンクを生成
         amazon_url = create_amazon_url(asin, keyword, target_mode)
         
         with st.container():
