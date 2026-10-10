@@ -63,7 +63,7 @@ target_mode = st.radio(
 )
 
 # ---------------------------------------------------------
-# 4. Google Books APIを用いた検索・取得関数
+# 4. Google Books APIを用いた検索・ISBN抽出関数
 # ---------------------------------------------------------
 def fetch_book_details_from_google(fallback_title, fallback_author):
     clean_query = f"{fallback_title} {fallback_author}"
@@ -80,12 +80,21 @@ def fetch_book_details_from_google(fallback_title, fallback_author):
                 authors = volume_info.get("authors", [fallback_author])
                 author_str = ", ".join(authors)
                 
+                # ISBNを確実に抽出する（ISBN_13を最優先、なければISBN_10）
                 isbn = ""
-                for identifier in volume_info.get("industryIdentifiers", []):
-                    identifier_type = identifier.get("type")
-                    if identifier_type in ["ISBN_13", "ISBN_10"]:
+                identifiers = volume_info.get("industryIdentifiers", [])
+                
+                # まずISBN_13を探す
+                for identifier in identifiers:
+                    if identifier.get("type") == "ISBN_13":
                         isbn = identifier.get("identifier")
-                        if identifier_type == "ISBN_13":
+                        break
+                
+                # ISBN_13がなければISBN_10を探す
+                if not isbn:
+                    for identifier in identifiers:
+                        if identifier.get("type") == "ISBN_10":
+                            isbn = identifier.get("identifier")
                             break
                 
                 image_links = volume_info.get("imageLinks", {})
@@ -217,7 +226,7 @@ if st.button("この条件で探す", type="primary", use_container_width=True):
                     st.session_state.history_titles.append(book.get("title", ""))
 
 # ---------------------------------------------------------
-# 8. 結果表示（ISBN:不明 の出力対応）
+# 8. 結果表示
 # ---------------------------------------------------------
 if st.session_state.current_recommendations:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -241,7 +250,7 @@ if st.session_state.current_recommendations:
                 st.markdown(f"**{title}**")
                 st.caption(f"著：{author}")
                 
-                # ISBNがある場合はそれを表示し、ない場合は「ISBN:不明」と表示
+                # 正しいISBN、または「ISBN:不明」を表示
                 if isbn:
                     st.caption(f"ISBN: {isbn}")
                 else:
