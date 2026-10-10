@@ -47,9 +47,7 @@ target_mode = st.radio(
 # 4. Amazonリンク整形用関数
 # ---------------------------------------------------------
 def format_amazon_url(ai_url, title, author, mode):
-    # AIが実際のAmazon商品URLを取得できている場合、アソシエイトタグを綺麗に付与
     if ai_url and "amazon.co.jp" in ai_url:
-        # すでにタグがある場合は置換、なければ追加
         parsed_url = urllib.parse.urlparse(ai_url)
         query_params = urllib.parse.parse_qs(parsed_url.query)
         query_params['tag'] = [ASSOCIATE_TAG]
@@ -78,7 +76,7 @@ def format_amazon_url(ai_url, title, author, mode):
             return f"https://www.amazon.co.jp/s?k={encoded_keyword}&tag={ASSOCIATE_TAG}"
 
 # ---------------------------------------------------------
-# 5. AI選書ロジック（Google検索で本物のURLを取得）
+# 5. AI選書ロジック（検索ツールとJSONパースの安全両立）
 # ---------------------------------------------------------
 def fetch_recommendations(prompt_text, exclude_list, mode):
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -87,10 +85,10 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     system_instruction = """
     あなたは親切で優秀なプロの選書家です。
     ユーザーの入力内容に基づいて、日本のAmazonに実際に存在する実在の書籍を5冊選定してください。
-    【重要】必ずGoogle検索ツールを使用して、Web上のAmazonに掲載されている実際の書籍ページ（商品URL）を確認・取得してください。架空の本は絶対に含めないでください。
-    以下の指定されたJSONフォーマットのみを出力してください。余計な解説文やMarkdownの装飾は含めないでください。
+    【重要】必ずGoogle検索を使用して、Web上のAmazonに掲載されている実際の書籍ページ（商品URL）を確認・取得してください。架空の本は絶対に含めないでください。
+    
+    必ず以下のJSON配列フォーマット「のみ」を出力してください。Markdownのコードブロック（```json ... ```）や、前後の余分な解説文は一切含めないでください。
 
-    【出力JSONフォーマット】
     [
       {
         "title": "書籍タイトル",
@@ -112,22 +110,30 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     {", ".join(exclude_list) if exclude_list else "なし"}
     """
 
-    # Google検索（Grounding）を有効化
+    # response_mime_typeを使わず、Google検索ツールのみを有効化
     response = client.models.generate_content(
         model="gemini-3.8-flash",
         contents=user_prompt,
         config={
             "system_instruction": system_instruction,
-            "response_mime_type": "application/json",
             "tools": [{"google_search": {}}]
         }
     )
 
     try:
-        data = json.loads(response.text)
+        # 返ってきたテキストから、マークダウンのバッククォート等が含まれていた場合に備えて綺麗にクリーニング
+        raw_text = response.text.strip()
+        if raw_text.startswith("```json"):
+            raw_text = raw_text[7:]
+        if raw_text.startswith("```"):
+            raw_text = raw_text[3:]
+        if raw_text.endswith("```"):
+            raw_text = raw_text[:-3]
+        
+        data = json.loads(raw_text.strip())
         return data
     except Exception as e:
-        st.error("AIからのデータ取得に失敗しました。もう一度お試しください。")
+        st.error(f"AIからのデータ解析に失敗しました。もう一度お試しください。（詳細: {e}）")
         return []
 
 # ---------------------------------------------------------
