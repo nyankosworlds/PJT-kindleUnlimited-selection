@@ -78,7 +78,7 @@ def create_amazon_url(search_keyword, mode):
     return url
 
 # ---------------------------------------------------------
-# 5. 選書ロジック（サーバー過負荷の専用ハンドリング追加）
+# 5. 選書ロジック（gemini-3.8-flash 指定版）
 # ---------------------------------------------------------
 def fetch_recommendations(prompt_text, exclude_list, mode):
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -123,8 +123,9 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     """
 
     try:
+        # APIが推奨している最新の標準モデルを指定
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",
             contents=user_prompt,
             config={
                 "system_instruction": system_instruction,
