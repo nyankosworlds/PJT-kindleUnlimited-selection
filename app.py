@@ -97,7 +97,7 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     """
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=user_prompt,
         config={"system_instruction": system_instruction, "response_mime_type": "application/json"}
     )
