@@ -224,7 +224,7 @@ if st.button("この条件で探す", type="primary", use_container_width=True):
                     st.session_state.history_titles.append(book.get("title", ""))
 
 # ---------------------------------------------------------
-# 8. 結果表示
+# 8. 結果表示（ISBN表示対応）
 # ---------------------------------------------------------
 if st.session_state.current_recommendations:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -250,6 +250,8 @@ if st.session_state.current_recommendations:
                     st.image(cover_url, width=110)
                 st.markdown(f"**{title}**")
                 st.caption(f"著：{author}")
+                if isbn:
+                    st.caption(f"ISBN: {isbn}")
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.link_button("Amazonで詳細を見る", amazon_url, use_container_width=True)
             
