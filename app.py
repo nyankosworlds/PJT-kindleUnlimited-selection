@@ -44,25 +44,27 @@ target_mode = st.radio(
 )
 
 # ---------------------------------------------------------
-# 4. Amazonリンク生成用関数
+# 4. Amazon個別リンク（直リンク）生成用関数
 # ---------------------------------------------------------
-def create_amazon_url(search_keyword, mode):
-    encoded_keyword = urllib.parse.quote(search_keyword)
-    if mode == "Kindle Unlimited対象のみ":
-        # Kindle Unlimited絞り込みパラメータ付与
-        url = (
-            f"https://www.amazon.co.jp/s?k={encoded_keyword}"
-            f"&i=digital-text"
-            f"&rh=p_n_feature_nineteen_browse-bin%3A3169286051"
-            f"&tag={ASSOCIATE_TAG}"
-        )
+def create_amazon_url(asin, search_keyword, mode):
+    if asin and len(asin) == 10:
+        # ASINを使った確実な個別商品ページへの直リンク
+        return f"https://www.amazon.co.jp/dp/{asin}?tag={ASSOCIATE_TAG}"
     else:
-        # Amazon全体検索
-        url = f"https://www.amazon.co.jp/s?k={encoded_keyword}&tag={ASSOCIATE_TAG}"
-    return url
+        # 万が一ASINが空または不正な場合のフォールバック（検索結果リンク）
+        encoded_keyword = urllib.parse.quote(search_keyword)
+        if mode == "Kindle Unlimited対象のみ":
+            return (
+                f"https://www.amazon.co.jp/s?k={encoded_keyword}"
+                f"&i=digital-text"
+                f"&rh=p_n_feature_nineteen_browse-bin%3A3169286051"
+                f"&tag={ASSOCIATE_TAG}"
+            )
+        else:
+            return f"https://www.amazon.co.jp/s?k={encoded_keyword}&tag={ASSOCIATE_TAG}"
 
 # ---------------------------------------------------------
-# 5. AI選書ロジック（Gemini API呼び出し）
+# 5. AI選書ロジック（Google検索 ＋ ASIN取得）
 # ---------------------------------------------------------
 def fetch_recommendations(prompt_text, exclude_list, mode):
     # SecretsからAPIキーを取得してクライアント作成
@@ -71,7 +73,9 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
 
     system_instruction = """
     あなたは親切で優秀なプロの選書家です。
-    ユーザーの入力内容に基づいて、最適な本を5冊選定してください。
+    ユーザーの入力内容に基づいて、日本のAmazonに実際に存在する本を5冊選定してください。
+    必ずGoogle検索を使用して、実在を確認できた書籍のみを提案してください。架空の本は絶対に含めないでください。
+    また、各書籍のAmazonのURLに含まれる10桁のASIN（またはISBN-10）を必ず調べて正確に出力してください。
     以下の指定されたJSONフォーマットのみを出力してください。余計な解説文やMarkdownの装飾は含めないでください。
 
     【出力JSONフォーマット】
@@ -80,6 +84,7 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
         "title": "書籍タイトル",
         "author": "著者名",
         "reason": "おすすめの理由（100文字程度）",
+        "asin": "10桁のASINコード（例: B08XXXXXXX）",
         "search_keyword": "Amazon検索用キーワード（書名 著者名）"
       }
     ]
@@ -96,10 +101,15 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     {", ".join(exclude_list) if exclude_list else "なし"}
     """
 
+    # Google検索ツール（Grounding）を有効化してハルシネーションを防ぐ
     response = client.models.generate_content(
         model="gemini-3.8-flash",
         contents=user_prompt,
-        config={"system_instruction": system_instruction, "response_mime_type": "application/json"}
+        config={
+            "system_instruction": system_instruction,
+            "response_mime_type": "application/json",
+            "tools": [{"google_search": {}}]
+        }
     )
 
     try:
@@ -120,9 +130,8 @@ with col1:
         if not user_input.strip():
             st.warning("リクエスト内容を入力してください。")
         else:
-            # 履歴をリセットして再検索
             st.session_state.history_titles = []
-            with st.spinner("AIが選書中..."):
+            with st.spinner("AIが実在する本を検索・選書中..."):
                 results = fetch_recommendations(user_input, st.session_state.history_titles, target_mode)
                 st.session_state.current_recommendations = results
                 for book in results:
@@ -149,15 +158,17 @@ if st.session_state.current_recommendations:
         title = book.get("title", "不明なタイトル")
         author = book.get("author", "不明な著者")
         reason = book.get("reason", "")
+        asin = book.get("asin", "")
         keyword = book.get("search_keyword", f"{title} {author}")
         
-        amazon_url = create_amazon_url(keyword, target_mode)
+        # 直リンク（ASIN利用）を生成
+        amazon_url = create_amazon_url(asin, keyword, target_mode)
         
         with st.container():
             st.markdown(f"### {i}. {title}")
             st.caption(f"著者: {author}")
             st.write(reason)
-            st.link_button(f"🔍 Amazonで探す ({target_mode})", amazon_url)
+            st.link_button(f"📖 Amazonで詳細を見る ({target_mode})", amazon_url)
             st.write("")
 
 # フッター・ステマ規制/規約表示
