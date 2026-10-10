@@ -7,7 +7,7 @@ from google import genai
 # 1. ページ初期設定（洗練されたミニマルなカスタムCSS）
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="本棚の隙間で / 蔵書案内",
+    page_title="今日は何読む / 蔵書案内",
     page_icon="📖",
     layout="centered"
 )
@@ -43,8 +43,8 @@ if "current_recommendations" not in st.session_state:
 # ---------------------------------------------------------
 # 3. UI表示（ヘッダー・入力フォーム）
 # ---------------------------------------------------------
-st.markdown("### 今日の本棚から")
-st.caption("気分や読書環境にあわせ、静かにひらく一冊をご案内します。")
+st.markdown("### 今日は何読む")
+st.caption("気分や読書環境にあわせ、静かにひらく一冊をAIが選んでくれます。")
 
 # 入力フォーム
 user_input = st.text_area(
@@ -194,7 +194,7 @@ if st.session_state.current_recommendations:
     # -----------------------------------------------------
     # 8. 「別の本を見る」ボタン
     # -----------------------------------------------------
-    if st.button("ほかの本も見てみる", use_container_width=True):
+    if st.button("ほかの本も見る", use_container_width=True):
         if not user_input.strip():
             st.warning("先に入力内容をご確認ください。")
         else:
