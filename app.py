@@ -1,6 +1,4 @@
 import json
-import urllib.parse
-import requests
 import streamlit as st
 from google import genai
 from google.genai.errors import ServerError
@@ -25,14 +23,8 @@ st.markdown("""
             border-radius: 4px;
             font-weight: 400;
         }
-        .stLinkButton button {
-            border-radius: 4px;
-        }
     </style>
 """, unsafe_allow_html=True)
-
-# AmazonアソシエイトID（ご自身のアソシエイトIDを取得後に書き換えてください）
-ASSOCIATE_TAG = "your_tracking_id-22"
 
 # ---------------------------------------------------------
 # 2. セッション状態の初期化
@@ -63,85 +55,7 @@ target_mode = st.radio(
 )
 
 # ---------------------------------------------------------
-# 4. Google Books APIを用いた検索・ISBN抽出関数
-# ---------------------------------------------------------
-def fetch_book_details_from_google(fallback_title, fallback_author):
-    clean_query = f"{fallback_title} {fallback_author}"
-    encoded_query = urllib.parse.quote(clean_query)
-    url = f"https://www.googleapis.com/books/v1/volumes?q={encoded_query}&maxResults=1"
-    
-    try:
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            if "items" in data and len(data["items"]) > 0:
-                volume_info = data["items"][0].get("volumeInfo", {})
-                title = volume_info.get("title", fallback_title)
-                authors = volume_info.get("authors", [fallback_author])
-                author_str = ", ".join(authors)
-                
-                # ISBNを確実に抽出する（ISBN_13を最優先、なければISBN_10）
-                isbn = ""
-                identifiers = volume_info.get("industryIdentifiers", [])
-                
-                # まずISBN_13を探す
-                for identifier in identifiers:
-                    if identifier.get("type") == "ISBN_13":
-                        isbn = identifier.get("identifier")
-                        break
-                
-                # ISBN_13がなければISBN_10を探す
-                if not isbn:
-                    for identifier in identifiers:
-                        if identifier.get("type") == "ISBN_10":
-                            isbn = identifier.get("identifier")
-                            break
-                
-                image_links = volume_info.get("imageLinks", {})
-                thumbnail = image_links.get("thumbnail") or image_links.get("smallThumbnail")
-                if thumbnail:
-                    thumbnail = thumbnail.replace("http://", "https://")
-                
-                return isbn, thumbnail, title, author_str
-    except Exception:
-        pass
-    
-    return "", None, fallback_title, fallback_author
-
-# ---------------------------------------------------------
-# 5. Amazonリンク生成関数
-# ---------------------------------------------------------
-def create_amazon_url(isbn, title, author, mode):
-    clean_isbn = "".join(filter(str.isdigit, str(isbn)))
-    
-    is_valid_isbn = False
-    asin = ""
-    
-    if len(clean_isbn) == 10:
-        asin = clean_isbn
-        is_valid_isbn = True
-    elif len(clean_isbn) == 13 and clean_isbn.startswith("978"):
-        asin = clean_isbn[3:12]
-        is_valid_isbn = True
-
-    if is_valid_isbn and len(asin) == 9:
-        url = f"https://www.amazon.co.jp/dp/{asin}?tag={ASSOCIATE_TAG}"
-    else:
-        encoded_keyword = urllib.parse.quote(f"{title} {author}")
-        if mode == "Kindle Unlimited 対象のみ":
-            url = (
-                f"https://www.amazon.co.jp/s?k={encoded_keyword}"
-                f"&i=digital-text"
-                f"&rh=p_n_feature_nineteen_browse-bin%3A3169286051"
-                f"&tag={ASSOCIATE_TAG}"
-            )
-        else:
-            url = f"https://www.amazon.co.jp/s?k={encoded_keyword}&tag={ASSOCIATE_TAG}"
-            
-    return url
-
-# ---------------------------------------------------------
-# 6. 選書ロジック
+# 4. 選書ロジック
 # ---------------------------------------------------------
 def fetch_recommendations(prompt_text, exclude_list, mode):
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -166,7 +80,8 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
       {{
         "title": "書籍タイトル",
         "author": "著者名",
-        "reason": "選書の理由（100文字程度、落ち着いたトーンで）"
+        "reason": "選書の理由（コメント・100文字程度、落ち着いたトーンで）",
+        "keyword": "書籍を探すためのキーワード（例: 書籍タイトル 著者名）"
       }}
     ]
     """
@@ -211,7 +126,7 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
         return []
 
 # ---------------------------------------------------------
-# 7. ボタン処理（新規選書）
+# 5. ボタン処理（新規選書）
 # ---------------------------------------------------------
 if st.button("この条件で探す", type="primary", use_container_width=True):
     if not user_input.strip():
@@ -226,7 +141,7 @@ if st.button("この条件で探す", type="primary", use_container_width=True):
                     st.session_state.history_titles.append(book.get("title", ""))
 
 # ---------------------------------------------------------
-# 8. 結果表示
+# 6. 結果表示（指定フォーマット）
 # ---------------------------------------------------------
 if st.session_state.current_recommendations:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -234,35 +149,15 @@ if st.session_state.current_recommendations:
     st.markdown("---")
     
     for i, book in enumerate(st.session_state.current_recommendations, 1):
-        raw_title = book.get("title", "不明なタイトル")
-        raw_author = book.get("author", "不明な著者")
+        title = book.get("title", "不明なタイトル")
+        author = book.get("author", "不明な著者")
         reason = book.get("reason", "")
-        
-        isbn, cover_url, title, author = fetch_book_details_from_google(raw_title, raw_author)
-        amazon_url = create_amazon_url(isbn, title, author, target_mode)
+        keyword = book.get("keyword", f"{title} {author}")
         
         with st.container():
-            col_left, col_right = st.columns([1.2, 2.0])
-            
-            with col_left:
-                if cover_url:
-                    st.image(cover_url, width=110)
-                st.markdown(f"**{title}**")
-                st.caption(f"著：{author}")
-                
-                # 正しいISBN、または「ISBN:不明」を表示
-                if isbn:
-                    st.caption(f"ISBN: {isbn}")
-                else:
-                    st.caption("ISBN: 不明")
-                    
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.link_button("Amazonで詳細を見る", amazon_url, use_container_width=True)
-            
-            with col_right:
-                st.caption("案内人より")
-                st.write(reason)
-            
+            st.markdown(f"**{title}** 著：{author}")
+            st.markdown(f"> {reason}")
+            st.caption(f"キーワード: {keyword}")
             st.markdown("---")
 
     if st.button("ほかの本も見てみる", use_container_width=True):
@@ -278,7 +173,3 @@ if st.session_state.current_recommendations:
                     st.rerun()
 
 st.markdown("<br>", unsafe_allow_html=True)
-st.caption(
-    "当サービスはAmazonアソシエイト・プログラムに参加しています。"
-    "紹介リンクを経由したご購入やご登録により、運営上の成果報酬を得ることがあります。"
-)
