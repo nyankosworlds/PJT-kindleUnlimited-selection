@@ -7,7 +7,7 @@ from google.genai.errors import ServerError
 # 1. ページ初期設定（洗練されたミニマルなカスタムCSS）
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="つぎは何読む？/AI選書",
+    page_title="今日は何読む / 蔵書案内",
     page_icon="📖",
     layout="centered"
 )
@@ -38,7 +38,7 @@ if "current_recommendations" not in st.session_state:
 # 3. UI表示（ヘッダー・入力フォーム）
 # ---------------------------------------------------------
 st.markdown("### 今日は何読む")
-st.caption("気分や読書環境にあわせ、つぎの一冊をAIが選んでくれます。")
+st.caption("気分や読書環境にあわせ、静かにひらく一冊をAIが選んでくれます。")
 
 # 入力フォーム
 user_input = st.text_area(
@@ -55,7 +55,7 @@ target_mode = st.radio(
 )
 
 # ---------------------------------------------------------
-# 4. 選書ロジック（関連タグの抽出を追加）
+# 4. 選書ロジック（Kindle Unlimited判定の精度強化版）
 # ---------------------------------------------------------
 def fetch_recommendations(prompt_text, exclude_list, mode):
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -63,7 +63,13 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
 
     mode_condition = ""
     if mode == "Kindle Unlimited 対象のみ":
-        mode_condition = "【重要】Amazonの「Kindle Unlimited」の読み放題対象となっている確実な書籍のみを選定してください。少しでも対象か怪しい本は含めないでください。"
+        mode_condition = (
+            "【重要・Kindle Unlimited判定基準】\n"
+            "Amazonの「Kindle Unlimited（読み放題）」の対象となっている確実な書籍のみを選定してください。\n"
+            "※芥川賞・直木賞などの主要文学賞を受賞した大手出版社（文藝春秋、新潮社、講談社など）の有名作品や話題作は、"
+            "通常購入が中心でありKindle Unlimitedの対象外であることが多いため、含めないでください。\n"
+            "個人出版、インディーズ、またはサブスクリプションの読み放題ラインナップに頻繁に含まれる実用書・エッセイ・ライトノベル・インディーズ小説などを優先し、少しでも対象か怪しい本は絶対に除外してください。"
+        )
     else:
         mode_condition = "Amazonで広く流通している実在の書籍を選定してください。"
 
@@ -74,7 +80,7 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     
     【重要】条件に完全に合致する確かな本のみを出力してください。数が足りない場合でも、無理に水増しして架空の本や条件外の本を含めることは絶対に避けてください（1冊だけでも構いません）。
     
-    `keywords` フィールドには、その本の特徴・雰囲気・ジャンルを表す言葉（例: 「ほっこり」「SF」「ドキュメンタリー」「夜読」「エッセイ」「歴史」など）を3〜5個程度のハッシュタグ形式の文字列（例: "#ほっこり #エッセイ #夜読"）として含めてください。
+    `keywords` フィールドには、その本の特徴・雰囲気・ジャンルを表す言葉（例: 「#ほっこり」「#SF」「#ドキュメンタリー」「#夜読」「#エッセイ」など）を3〜5個程度のハッシュタグ形式の文字列として含めてください。
     
     必ず以下のJSON配列フォーマット「のみ」を出力してください。Markdownのコードブロック（```json ... ```）や前後の解説文は含めないでください。
 
@@ -143,7 +149,7 @@ if st.button("この条件で探す", type="primary", use_container_width=True):
                     st.session_state.history_titles.append(book.get("title", ""))
 
 # ---------------------------------------------------------
-# 6. 結果表示（タグ表示対応）
+# 6. 結果表示
 # ---------------------------------------------------------
 if st.session_state.current_recommendations:
     st.markdown("<br>", unsafe_allow_html=True)
