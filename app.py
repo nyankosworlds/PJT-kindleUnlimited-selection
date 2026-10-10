@@ -44,35 +44,50 @@ target_mode = st.radio(
 )
 
 # ---------------------------------------------------------
-# 4. Amazon検索リンク生成用関数（確実に繋がる方式）
+# 4. Amazonリンク整形用関数
 # ---------------------------------------------------------
-def create_amazon_url(search_keyword, mode):
-    encoded_keyword = urllib.parse.quote(search_keyword)
-    if mode == "Kindle Unlimited対象のみ":
-        # Kindle Unlimited絞り込みパラメータ付与
-        url = (
-            f"https://www.amazon.co.jp/s?k={encoded_keyword}"
-            f"&i=digital-text"
-            f"&rh=p_n_feature_nineteen_browse-bin%3A3169286051"
-            f"&tag={ASSOCIATE_TAG}"
-        )
+def format_amazon_url(ai_url, title, author, mode):
+    # AIが実際のAmazon商品URLを取得できている場合、アソシエイトタグを綺麗に付与
+    if ai_url and "amazon.co.jp" in ai_url:
+        # すでにタグがある場合は置換、なければ追加
+        parsed_url = urllib.parse.urlparse(ai_url)
+        query_params = urllib.parse.parse_qs(parsed_url.query)
+        query_params['tag'] = [ASSOCIATE_TAG]
+        
+        new_query = urllib.parse.urlencode(query_params, doseq=True)
+        cleaned_url = urllib.parse.urlunparse((
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path,
+            parsed_url.params,
+            new_query,
+            parsed_url.fragment
+        ))
+        return cleaned_url
     else:
-        # Amazon全体検索
-        url = f"https://www.amazon.co.jp/s?k={encoded_keyword}&tag={ASSOCIATE_TAG}"
-    return url
+        # フォールバック：確実な検索結果URL
+        encoded_keyword = urllib.parse.quote(f"{title} {author}")
+        if mode == "Kindle Unlimited対象のみ":
+            return (
+                f"https://www.amazon.co.jp/s?k={encoded_keyword}"
+                f"&i=digital-text"
+                f"&rh=p_n_feature_nineteen_browse-bin%3A3169286051"
+                f"&tag={ASSOCIATE_TAG}"
+            )
+        else:
+            return f"https://www.amazon.co.jp/s?k={encoded_keyword}&tag={ASSOCIATE_TAG}"
 
 # ---------------------------------------------------------
-# 5. AI選書ロジック
+# 5. AI選書ロジック（Google検索で本物のURLを取得）
 # ---------------------------------------------------------
 def fetch_recommendations(prompt_text, exclude_list, mode):
-    # SecretsからAPIキーを取得してクライアント作成
     api_key = st.secrets["GEMINI_API_KEY"]
     client = genai.Client(api_key=api_key)
 
     system_instruction = """
     あなたは親切で優秀なプロの選書家です。
-    ユーザーの入力内容に基づいて、最適な本を5冊選定してください。
-    各書籍について、Amazonで確実に検索できるように「書名 著者名」をまとめた検索キーワードを必ず作成してください。
+    ユーザーの入力内容に基づいて、日本のAmazonに実際に存在する実在の書籍を5冊選定してください。
+    【重要】必ずGoogle検索ツールを使用して、Web上のAmazonに掲載されている実際の書籍ページ（商品URL）を確認・取得してください。架空の本は絶対に含めないでください。
     以下の指定されたJSONフォーマットのみを出力してください。余計な解説文やMarkdownの装飾は含めないでください。
 
     【出力JSONフォーマット】
@@ -81,7 +96,7 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
         "title": "書籍タイトル",
         "author": "著者名",
         "reason": "おすすめの理由（100文字程度）",
-        "search_keyword": "Amazon検索用キーワード（例: 書籍名 著者名）"
+        "amazon_url": "Google検索で見つけたAmazonの実際の個別商品ページURL"
       }
     ]
     """
@@ -97,12 +112,14 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     {", ".join(exclude_list) if exclude_list else "なし"}
     """
 
+    # Google検索（Grounding）を有効化
     response = client.models.generate_content(
         model="gemini-3.8-flash",
         contents=user_prompt,
         config={
             "system_instruction": system_instruction,
-            "response_mime_type": "application/json"
+            "response_mime_type": "application/json",
+            "tools": [{"google_search": {}}]
         }
     )
 
@@ -125,7 +142,7 @@ with col1:
             st.warning("リクエスト内容を入力してください。")
         else:
             st.session_state.history_titles = []
-            with st.spinner("AIが選書中..."):
+            with st.spinner("AIがWeb上の実在書籍と商品ページを検索中..."):
                 results = fetch_recommendations(user_input, st.session_state.history_titles, target_mode)
                 st.session_state.current_recommendations = results
                 for book in results:
@@ -152,16 +169,16 @@ if st.session_state.current_recommendations:
         title = book.get("title", "不明なタイトル")
         author = book.get("author", "不明な著者")
         reason = book.get("reason", "")
-        keyword = book.get("search_keyword", f"{title} {author}")
+        raw_url = book.get("amazon_url", "")
         
-        # 確実にヒットする検索URLを生成
-        amazon_url = create_amazon_url(keyword, target_mode)
+        # リンクの整形とアソシエイトタグ付与
+        amazon_url = format_amazon_url(raw_url, title, author, target_mode)
         
         with st.container():
             st.markdown(f"### {i}. {title}")
             st.caption(f"著者: {author}")
             st.write(reason)
-            st.link_button(f"🔍 Amazonで『{title}』を探す ({target_mode})", amazon_url)
+            st.link_button(f"📖 Amazonで詳細を見る ({target_mode})", amazon_url)
             st.write("")
 
 # フッター・ステマ規制/規約表示
