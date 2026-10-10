@@ -2,6 +2,7 @@ import json
 import urllib.parse
 import streamlit as st
 from google import genai
+from google.genai.errors import ServerError
 
 # ---------------------------------------------------------
 # 1. ページ初期設定（洗練されたミニマルなカスタムCSS）
@@ -77,7 +78,7 @@ def create_amazon_url(search_keyword, mode):
     return url
 
 # ---------------------------------------------------------
-# 5. 選書ロジック（エラー修正版）
+# 5. 選書ロジック（サーバー過負荷の専用ハンドリング追加）
 # ---------------------------------------------------------
 def fetch_recommendations(prompt_text, exclude_list, mode):
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -89,7 +90,6 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     else:
         mode_condition = "Amazonで広く流通している実在の書籍を選定してください。"
 
-    # f文字列内のJSONフォーマットの波括弧を {{ }} にエスケープ
     system_instruction = f"""
     あなたは物静かで思慮深い独立系書店の店主です。
     ユーザーの入力内容と条件に基づいて、実在の書籍を「最大3冊（1〜3冊）」選定してください。
@@ -122,16 +122,16 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     {", ".join(exclude_list) if exclude_list else "なし"}
     """
 
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=user_prompt,
-        config={
-            "system_instruction": system_instruction,
-            "response_mime_type": "application/json"
-        }
-    )
-
     try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=user_prompt,
+            config={
+                "system_instruction": system_instruction,
+                "response_mime_type": "application/json"
+            }
+        )
+
         raw_text = response.text.strip()
         if raw_text.startswith("```json"):
             raw_text = raw_text[7:]
@@ -142,6 +142,10 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
             
         data = json.loads(raw_text.strip())
         return data
+
+    except ServerError:
+        st.warning("現在、AIのサーバーが混み合っております。少し時間をおいてから、再度「この条件で探す」をお試しください。")
+        return []
     except Exception as e:
         st.error(f"データの取得に失敗しました。少し時間をおいて再度お試しください。（詳細: {e}）")
         return []
@@ -156,9 +160,10 @@ if st.button("この条件で探す", type="primary", use_container_width=True):
         st.session_state.history_titles = []
         with st.spinner("本棚を確認しています..."):
             results = fetch_recommendations(user_input, st.session_state.history_titles, target_mode)
-            st.session_state.current_recommendations = results
-            for book in results:
-                st.session_state.history_titles.append(book.get("title", ""))
+            if results:
+                st.session_state.current_recommendations = results
+                for book in results:
+                    st.session_state.history_titles.append(book.get("title", ""))
 
 # ---------------------------------------------------------
 # 7. 結果表示（2カラムレイアウト）
@@ -194,16 +199,17 @@ if st.session_state.current_recommendations:
     # -----------------------------------------------------
     # 8. 「別の本を見る」ボタン
     # -----------------------------------------------------
-    if st.button("ほかの本も見る", use_container_width=True):
+    if st.button("ほかの本も見てみる", use_container_width=True):
         if not user_input.strip():
             st.warning("先に入力内容をご確認ください。")
         else:
             with st.spinner("別の本を探しています..."):
                 results = fetch_recommendations(user_input, st.session_state.history_titles, target_mode)
-                st.session_state.current_recommendations = results
-                for book in results:
-                    st.session_state.history_titles.append(book.get("title", ""))
-                st.rerun()
+                if results:
+                    st.session_state.current_recommendations = results
+                    for book in results:
+                        st.session_state.history_titles.append(book.get("title", ""))
+                    st.rerun()
 
 # フッター・規約表示
 st.markdown("<br>", unsafe_allow_html=True)
