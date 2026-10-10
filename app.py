@@ -63,15 +63,11 @@ target_mode = st.radio(
 )
 
 # ---------------------------------------------------------
-# 4. Google Books APIを用いた正確な書誌情報・ISBN・書影の取得関数
+# 4. Google Books APIを用いた検索・取得関数
 # ---------------------------------------------------------
 def fetch_book_details_from_google(fallback_title, fallback_author):
-    """
-    AIが選んだタイトルと著者名をもとに、Google Books APIで検索し、
-    本物のISBN、正確なタイトル、著者名、書影URLを確実に取得する。
-    """
-    query = f"intitle:{fallback_title} inauthor:{fallback_author}"
-    encoded_query = urllib.parse.quote(query)
+    clean_query = f"{fallback_title} {fallback_author}"
+    encoded_query = urllib.parse.quote(clean_query)
     url = f"https://www.googleapis.com/books/v1/volumes?q={encoded_query}&maxResults=1"
     
     try:
@@ -84,16 +80,14 @@ def fetch_book_details_from_google(fallback_title, fallback_author):
                 authors = volume_info.get("authors", [fallback_author])
                 author_str = ", ".join(authors)
                 
-                # 正しいISBN（13桁または10桁）をindustryIdentifiersから抽出
                 isbn = ""
                 for identifier in volume_info.get("industryIdentifiers", []):
                     identifier_type = identifier.get("type")
                     if identifier_type in ["ISBN_13", "ISBN_10"]:
                         isbn = identifier.get("identifier")
                         if identifier_type == "ISBN_13":
-                            break # 13桁を優先
+                            break
                 
-                # 書影画像URLの取得
                 image_links = volume_info.get("imageLinks", {})
                 thumbnail = image_links.get("thumbnail") or image_links.get("smallThumbnail")
                 if thumbnail:
@@ -106,7 +100,7 @@ def fetch_book_details_from_google(fallback_title, fallback_author):
     return "", None, fallback_title, fallback_author
 
 # ---------------------------------------------------------
-# 5. Amazonリンク生成関数（ISBNベース）
+# 5. Amazonリンク生成関数
 # ---------------------------------------------------------
 def create_amazon_url(isbn, title, author, mode):
     clean_isbn = "".join(filter(str.isdigit, str(isbn)))
@@ -121,7 +115,6 @@ def create_amazon_url(isbn, title, author, mode):
         asin = clean_isbn[3:12]
         is_valid_isbn = True
 
-    # 正しいISBN/ASINがある場合は直接商品ページ（/dp/）へ、ない場合は検索へフォールバック
     if is_valid_isbn and len(asin) == 9:
         url = f"https://www.amazon.co.jp/dp/{asin}?tag={ASSOCIATE_TAG}"
     else:
@@ -139,7 +132,7 @@ def create_amazon_url(isbn, title, author, mode):
     return url
 
 # ---------------------------------------------------------
-# 6. 選書ロジック（AIにはタイトルと著者名のみを出力させる）
+# 6. 選書ロジック
 # ---------------------------------------------------------
 def fetch_recommendations(prompt_text, exclude_list, mode):
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -224,7 +217,7 @@ if st.button("この条件で探す", type="primary", use_container_width=True):
                     st.session_state.history_titles.append(book.get("title", ""))
 
 # ---------------------------------------------------------
-# 8. 結果表示（ISBN表示対応）
+# 8. 結果表示（ISBN:不明 の出力対応）
 # ---------------------------------------------------------
 if st.session_state.current_recommendations:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -236,10 +229,7 @@ if st.session_state.current_recommendations:
         raw_author = book.get("author", "不明な著者")
         reason = book.get("reason", "")
         
-        # Google Books API経由で正しいISBN、書影、書誌情報を取得
         isbn, cover_url, title, author = fetch_book_details_from_google(raw_title, raw_author)
-        
-        # 正しいISBNを使ったAmazon直リンクまたは検索リンクを生成
         amazon_url = create_amazon_url(isbn, title, author, target_mode)
         
         with st.container():
@@ -250,8 +240,13 @@ if st.session_state.current_recommendations:
                     st.image(cover_url, width=110)
                 st.markdown(f"**{title}**")
                 st.caption(f"著：{author}")
+                
+                # ISBNがある場合はそれを表示し、ない場合は「ISBN:不明」と表示
                 if isbn:
                     st.caption(f"ISBN: {isbn}")
+                else:
+                    st.caption("ISBN: 不明")
+                    
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.link_button("Amazonで詳細を見る", amazon_url, use_container_width=True)
             
