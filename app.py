@@ -73,9 +73,8 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
 
     system_instruction = """
     あなたは親切で優秀なプロの選書家です。
-    ユーザーの入力内容に基づいて、日本のAmazonに実際に存在する本を5冊選定してください。
-    必ずGoogle検索を使用して、実在を確認できた書籍のみを提案してください。架空の本は絶対に含めないでください。
-    また、各書籍のAmazonのURLに含まれる10桁のASIN（またはISBN-10）を必ず調べて正確に出力してください。
+    ユーザーの入力内容に基づいて、日本のAmazonに実際に存在する信頼性の高い本を5冊選定してください。
+    各書籍のAmazonのURLに含まれる10桁のASIN（またはISBN-10）を正確に出力してください。
     以下の指定されたJSONフォーマットのみを出力してください。余計な解説文やMarkdownの装飾は含めないでください。
 
     【出力JSONフォーマット】
@@ -101,14 +100,13 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     {", ".join(exclude_list) if exclude_list else "なし"}
     """
 
-    # Google検索ツール（Grounding）を有効化してハルシネーションを防ぐ
+    # 安定動作のためtools設定を一時的に除外
     response = client.models.generate_content(
         model="gemini-3.8-flash",
         contents=user_prompt,
         config={
             "system_instruction": system_instruction,
-            "response_mime_type": "application/json",
-            "tools": [{"google_search": {}}]
+            "response_mime_type": "application/json"
         }
     )
 
@@ -118,7 +116,6 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     except Exception as e:
         st.error("AIからのデータ取得に失敗しました。もう一度お試しください。")
         return []
-
 # ---------------------------------------------------------
 # 6. ボタン処理とメイン描画
 # ---------------------------------------------------------
