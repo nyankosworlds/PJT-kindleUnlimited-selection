@@ -63,14 +63,17 @@ target_mode = st.radio(
 )
 
 # ---------------------------------------------------------
-# 4. Google Books APIを用いた書影＆詳細取得関数
+# 4. Google Books APIを用いた正確な書誌情報・ISBN・書影の取得関数
 # ---------------------------------------------------------
-def fetch_book_cover_and_info(isbn, fallback_title, fallback_author):
-    clean_isbn = "".join(filter(str.isdigit, str(isbn)))
-    if not clean_isbn:
-        return None, fallback_title, fallback_author
-
-    url = f"https://www.googleapis.com/books/v1/volumes?q=isbn:{clean_isbn}"
+def fetch_book_details_from_google(fallback_title, fallback_author):
+    """
+    AIが選んだタイトルと著者名をもとに、Google Books APIで検索し、
+    本物のISBN、正確なタイトル、著者名、書影URLを確実に取得する。
+    """
+    query = f"intitle:{fallback_title} inauthor:{fallback_author}"
+    encoded_query = urllib.parse.quote(query)
+    url = f"https://www.googleapis.com/books/v1/volumes?q={encoded_query}&maxResults=1"
+    
     try:
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
@@ -81,20 +84,29 @@ def fetch_book_cover_and_info(isbn, fallback_title, fallback_author):
                 authors = volume_info.get("authors", [fallback_author])
                 author_str = ", ".join(authors)
                 
+                # 正しいISBN（13桁または10桁）をindustryIdentifiersから抽出
+                isbn = ""
+                for identifier in volume_info.get("industryIdentifiers", []):
+                    identifier_type = identifier.get("type")
+                    if identifier_type in ["ISBN_13", "ISBN_10"]:
+                        isbn = identifier.get("identifier")
+                        if identifier_type == "ISBN_13":
+                            break # 13桁を優先
+                
+                # 書影画像URLの取得
                 image_links = volume_info.get("imageLinks", {})
                 thumbnail = image_links.get("thumbnail") or image_links.get("smallThumbnail")
-                
                 if thumbnail:
                     thumbnail = thumbnail.replace("http://", "https://")
                 
-                return thumbnail, title, author_str
+                return isbn, thumbnail, title, author_str
     except Exception:
         pass
     
-    return None, fallback_title, fallback_author
+    return "", None, fallback_title, fallback_author
 
 # ---------------------------------------------------------
-# 5. Amazonリンク生成関数（ISBNの有効性チェック付き）
+# 5. Amazonリンク生成関数（ISBNベース）
 # ---------------------------------------------------------
 def create_amazon_url(isbn, title, author, mode):
     clean_isbn = "".join(filter(str.isdigit, str(isbn)))
@@ -109,6 +121,7 @@ def create_amazon_url(isbn, title, author, mode):
         asin = clean_isbn[3:12]
         is_valid_isbn = True
 
+    # 正しいISBN/ASINがある場合は直接商品ページ（/dp/）へ、ない場合は検索へフォールバック
     if is_valid_isbn and len(asin) == 9:
         url = f"https://www.amazon.co.jp/dp/{asin}?tag={ASSOCIATE_TAG}"
     else:
@@ -126,7 +139,7 @@ def create_amazon_url(isbn, title, author, mode):
     return url
 
 # ---------------------------------------------------------
-# 6. 選書ロジック
+# 6. 選書ロジック（AIにはタイトルと著者名のみを出力させる）
 # ---------------------------------------------------------
 def fetch_recommendations(prompt_text, exclude_list, mode):
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -145,15 +158,12 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     
     【重要】条件に完全に合致する確かな本のみを出力してください。数が足りない場合でも、無理に水増しして架空の本や条件外の本を含めることは絶対に避けてください（1冊だけでも構いません）。
     
-    各書籍の「正確な10桁または13桁のISBN（ハイフンなし、またはあり）」を必ず `isbn` フィールドに含めてください。
-    
     必ず以下のJSON配列フォーマット「のみ」を出力してください。Markdownのコードブロック（```json ... ```）や前後の解説文は含めないでください。
 
     [
       {{
         "title": "書籍タイトル",
         "author": "著者名",
-        "isbn": "9784XXXXXXXXX",
         "reason": "選書の理由（100文字程度、落ち着いたトーンで）"
       }}
     ]
@@ -224,10 +234,12 @@ if st.session_state.current_recommendations:
     for i, book in enumerate(st.session_state.current_recommendations, 1):
         raw_title = book.get("title", "不明なタイトル")
         raw_author = book.get("author", "不明な著者")
-        isbn = book.get("isbn", "")
         reason = book.get("reason", "")
         
-        cover_url, title, author = fetch_book_cover_and_info(isbn, raw_title, raw_author)
+        # Google Books API経由で正しいISBN、書影、書誌情報を取得
+        isbn, cover_url, title, author = fetch_book_details_from_google(raw_title, raw_author)
+        
+        # 正しいISBNを使ったAmazon直リンクまたは検索リンクを生成
         amazon_url = create_amazon_url(isbn, title, author, target_mode)
         
         with st.container():
