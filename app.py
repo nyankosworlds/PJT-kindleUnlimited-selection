@@ -55,7 +55,7 @@ target_mode = st.radio(
 )
 
 # ---------------------------------------------------------
-# 4. 選書ロジック
+# 4. 選書ロジック（関連タグの抽出を追加）
 # ---------------------------------------------------------
 def fetch_recommendations(prompt_text, exclude_list, mode):
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -74,6 +74,8 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     
     【重要】条件に完全に合致する確かな本のみを出力してください。数が足りない場合でも、無理に水増しして架空の本や条件外の本を含めることは絶対に避けてください（1冊だけでも構いません）。
     
+    `keywords` フィールドには、その本の特徴・雰囲気・ジャンルを表す言葉（例: 「ほっこり」「SF」「ドキュメンタリー」「夜読」「エッセイ」「歴史」など）を3〜5個程度のハッシュタグ形式の文字列（例: "#ほっこり #エッセイ #夜読"）として含めてください。
+    
     必ず以下のJSON配列フォーマット「のみ」を出力してください。Markdownのコードブロック（```json ... ```）や前後の解説文は含めないでください。
 
     [
@@ -81,7 +83,7 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
         "title": "書籍タイトル",
         "author": "著者名",
         "reason": "選書の理由（コメント・100文字程度、落ち着いたトーンで）",
-        "keyword": "書籍を探すためのキーワード（例: 書籍タイトル 著者名）"
+        "keywords": "#ほっこり #エッセイ #夜読"
       }}
     ]
     """
@@ -141,7 +143,7 @@ if st.button("この条件で探す", type="primary", use_container_width=True):
                     st.session_state.history_titles.append(book.get("title", ""))
 
 # ---------------------------------------------------------
-# 6. 結果表示（指定フォーマット）
+# 6. 結果表示（タグ表示対応）
 # ---------------------------------------------------------
 if st.session_state.current_recommendations:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -152,12 +154,12 @@ if st.session_state.current_recommendations:
         title = book.get("title", "不明なタイトル")
         author = book.get("author", "不明な著者")
         reason = book.get("reason", "")
-        keyword = book.get("keyword", f"{title} {author}")
+        keywords = book.get("keywords", "#おすすめ")
         
         with st.container():
             st.markdown(f"**{title}** 著：{author}")
             st.markdown(f"> {reason}")
-            st.caption(f"キーワード: {keyword}")
+            st.caption(f"キーワード: {keywords}")
             st.markdown("---")
 
     if st.button("ほかの本も見てみる", use_container_width=True):
