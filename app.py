@@ -7,7 +7,7 @@ from google.genai.errors import ServerError
 # 1. ページ初期設定（洗練されたミニマルなカスタムCSS）
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="今日は何読む / 蔵書案内",
+    page_title="つぎは何読む？/AI選書",
     page_icon="📖",
     layout="centered"
 )
@@ -38,7 +38,7 @@ if "current_recommendations" not in st.session_state:
 # 3. UI表示（ヘッダー・入力フォーム）
 # ---------------------------------------------------------
 st.markdown("### 今日は何読む")
-st.caption("気分や読書環境にあわせ、静かにひらく一冊をAIが選んでくれます。")
+st.caption("気分や読書環境にあわせ、つぎの一冊をAIが選んでくれます。")
 
 # 入力フォーム
 user_input = st.text_area(
