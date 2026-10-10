@@ -1,5 +1,6 @@
 import json
 import urllib.parse
+import requests
 import streamlit as st
 from google import genai
 from google.genai.errors import ServerError
@@ -62,23 +63,74 @@ target_mode = st.radio(
 )
 
 # ---------------------------------------------------------
-# 4. Amazon検索リンク生成関数
+# 4. Google Books APIを用いた書影＆詳細取得関数
 # ---------------------------------------------------------
-def create_amazon_url(search_keyword, mode):
-    encoded_keyword = urllib.parse.quote(search_keyword)
-    if mode == "Kindle Unlimited 対象のみ":
-        url = (
-            f"https://www.amazon.co.jp/s?k={encoded_keyword}"
-            f"&i=digital-text"
-            f"&rh=p_n_feature_nineteen_browse-bin%3A3169286051"
-            f"&tag={ASSOCIATE_TAG}"
-        )
+def fetch_book_cover_and_info(isbn, fallback_title, fallback_author):
+    """
+    ISBNを元にGoogle Books APIから正確な書影とタイトルを取得する。
+    """
+    clean_isbn = "".join(filter(str.isdigit, str(isbn)))
+    if not clean_isbn:
+        return None, fallback_title, fallback_author
+
+    url = f"https://www.googleapis.com/books/v1/volumes?q=isbn:{clean_isbn}"
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if "items" in data and len(data["items"]) > 0:
+                volume_info = data["items"][0].get("volumeInfo", {})
+                title = volume_info.get("title", fallback_title)
+                authors = volume_info.get("authors", [fallback_author])
+                author_str = ", ".join(authors)
+                
+                # 書影画像URLの取得
+                image_links = volume_info.get("imageLinks", {})
+                thumbnail = image_links.get("thumbnail") or image_links.get("smallThumbnail")
+                
+                if thumbnail:
+                    thumbnail = thumbnail.replace("http://", "https://")
+                
+                return thumbnail, title, author_str
+    except Exception:
+        pass
+    
+    return None, fallback_title, fallback_author
+
+# ---------------------------------------------------------
+# 5. Amazon直接商品リンク生成関数（ISBNベース）
+# ---------------------------------------------------------
+def create_amazon_url(isbn, title, author, mode):
+    clean_isbn = "".join(filter(str.isdigit, str(isbn)))
+    
+    # 13桁のISBN（978始まり）からAmazonのASIN/10桁ISBN部分を抽出
+    if len(clean_isbn) == 13 and clean_isbn.startswith("978"):
+        asin = clean_isbn[3:12]
+    elif len(clean_isbn) == 10:
+        asin = clean_isbn
     else:
-        url = f"https://www.amazon.co.jp/s?k={encoded_keyword}&tag={ASSOCIATE_TAG}"
+        asin = ""
+
+    # 直接商品ページ（/dp/）に飛ばすことで確実に該当書籍を開く
+    if len(asin) >= 9:
+        url = f"https://www.amazon.co.jp/dp/{asin}?tag={ASSOCIATE_TAG}"
+    else:
+        # 万が一ISBNが不正な場合のフォールバック（キーワード検索）
+        encoded_keyword = urllib.parse.quote(f"{title} {author}")
+        if mode == "Kindle Unlimited 対象のみ":
+            url = (
+                f"https://www.amazon.co.jp/s?k={encoded_keyword}"
+                f"&i=digital-text"
+                f"&rh=p_n_feature_nineteen_browse-bin%3A3169286051"
+                f"&tag={ASSOCIATE_TAG}"
+            )
+        else:
+            url = f"https://www.amazon.co.jp/s?k={encoded_keyword}&tag={ASSOCIATE_TAG}"
+            
     return url
 
 # ---------------------------------------------------------
-# 5. 選書ロジック（gemini-3.8-flash 指定版）
+# 6. 選書ロジック（ISBN出力対応版）
 # ---------------------------------------------------------
 def fetch_recommendations(prompt_text, exclude_list, mode):
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -97,7 +149,7 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     
     【重要】条件に完全に合致する確かな本のみを出力してください。数が足りない場合でも、無理に水増しして架空の本や条件外の本を含めることは絶対に避けてください（1冊だけでも構いません）。
     
-    Amazonの検索窓で一発でヒットするように、各書籍の「正確な書籍タイトルと著者名」を組み合わせた検索キーワードを必ず `search_keyword` に設定してください。
+    各書籍の「正確な10桁または13桁のISBN（ハイフンなし、またはあり）」を必ず `isbn` フィールドに含めてください。
     
     必ず以下のJSON配列フォーマット「のみ」を出力してください。Markdownのコードブロック（```json ... ```）や前後の解説文は含めないでください。
 
@@ -105,8 +157,8 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
       {{
         "title": "書籍タイトル",
         "author": "著者名",
-        "reason": "選書の理由（100文字程度、落ち着いたトーンで）",
-        "search_keyword": "Amazon検索用キーワード（例: 書籍タイトル 著者名）"
+        "isbn": "9784XXXXXXXXX",
+        "reason": "選書の理由（100文字程度、落ち着いたトーンで）"
       }}
     ]
     """
@@ -123,7 +175,6 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
     """
 
     try:
-        # APIが推奨している最新の標準モデルを指定
         response = client.models.generate_content(
             model="gemini-3.8-flash",
             contents=user_prompt,
@@ -152,7 +203,7 @@ def fetch_recommendations(prompt_text, exclude_list, mode):
         return []
 
 # ---------------------------------------------------------
-# 6. ボタン処理（新規選書）
+# 7. ボタン処理（新規選書）
 # ---------------------------------------------------------
 if st.button("この条件で探す", type="primary", use_container_width=True):
     if not user_input.strip():
@@ -167,7 +218,7 @@ if st.button("この条件で探す", type="primary", use_container_width=True):
                     st.session_state.history_titles.append(book.get("title", ""))
 
 # ---------------------------------------------------------
-# 7. 結果表示（2カラムレイアウト）
+# 8. 結果表示（2カラム：左に書影・タイトル・直リンク / 右に理由）
 # ---------------------------------------------------------
 if st.session_state.current_recommendations:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -175,17 +226,23 @@ if st.session_state.current_recommendations:
     st.markdown("---")
     
     for i, book in enumerate(st.session_state.current_recommendations, 1):
-        title = book.get("title", "不明なタイトル")
-        author = book.get("author", "不明な著者")
+        raw_title = book.get("title", "不明なタイトル")
+        raw_author = book.get("author", "不明な著者")
+        isbn = book.get("isbn", "")
         reason = book.get("reason", "")
-        keyword = book.get("search_keyword", f"{title} {author}")
         
-        amazon_url = create_amazon_url(keyword, target_mode)
+        # Google Books APIから書影と正確な書誌情報を取得
+        cover_url, title, author = fetch_book_cover_and_info(isbn, raw_title, raw_author)
+        
+        # Amazonの個別商品ページへの直リンクを生成
+        amazon_url = create_amazon_url(isbn, title, author, target_mode)
         
         with st.container():
             col_left, col_right = st.columns([1.2, 2.0])
             
             with col_left:
+                if cover_url:
+                    st.image(cover_url, width=110)
                 st.markdown(f"**{title}**")
                 st.caption(f"著：{author}")
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -198,7 +255,7 @@ if st.session_state.current_recommendations:
             st.markdown("---")
 
     # -----------------------------------------------------
-    # 8. 「別の本を見る」ボタン
+    # 9. 「ほかの本も見てみる」ボタン
     # -----------------------------------------------------
     if st.button("ほかの本も見てみる", use_container_width=True):
         if not user_input.strip():
